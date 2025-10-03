@@ -1,82 +1,102 @@
 import os
 import asyncio
+import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-import random
 
-# Токен та chat_id
+# 🔑 Твій API ключ Alpha Vantage
+ALPHA_VANTAGE_KEY = "TMCO3557CFCJRLRX"
+
+# ⚡ Дані для Telegram
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TG_CHAT_ID = os.environ.get("TG_CHAT_ID")
 
 sending_signals = False
 
-# Валютні пари з ймовірністю вигідності (%)
-currency_pairs = {
-    "AED/CNY OTC": 92,
-    "AUD/CAD OTC": 92,
-    "AUD/CHF OTC": 92,
-    "AUD/NZD OTC": 92,
-    "AUD/USD OTC": 92,
-    "CAD/CHF OTC": 92,
-    "CHF/JPY OTC": 92,
-    "EUR/GBP OTC": 92,
-    "EUR/TRY OTC": 92,
-    "EUR/USD OTC": 92,
-    "NZD/JPY OTC": 92,
-    "UAH/USD OTC": 92,
-    "USD/JPY OTC": 58,
-    "GBP/USD OTC": 64,
-    # додаємо всі інші пари з твоєї таблиці...
-}
+# 📊 Отримання реальних даних з Alpha Vantage
+def get_forex_signal(pair="EUR/USD"):
+    from_symbol, to_symbol = pair.split("/")
+    url = (
+        f"https://www.alphavantage.co/query?function=FX_INTRADAY&from_symbol={from_symbol}"
+        f"&to_symbol={to_symbol}&interval=5min&apikey={ALPHA_VANTAGE_KEY}&outputsize=compact"
+    )
 
-def pick_best_pair():
-    """Вибирає валютну пару з максимальною ймовірністю ≥ 70%"""
-    best_pairs = {pair: chance for pair, chance in currency_pairs.items() if chance >= 70}
-    if not best_pairs:
+    response = requests.get(url)
+    data = response.json()
+
+    if "Time Series FX (5min)" not in data:
         return None
-    # обираємо випадкову з найвищою ймовірністю
-    max_chance = max(best_pairs.values())
-    top_pairs = [pair for pair, chance in best_pairs.items() if chance == max_chance]
-    return random.choice(top_pairs)
 
-async def send_signal(app):
-    """Надіслати сигнал з найвигіднішою парою"""
-    pair = pick_best_pair()
-    if not pair:
-        print("Немає пар для сигналу з достатньою ймовірністю")
-        return
-    try:
-        await app.bot.send_message(
-            chat_id=int(TG_CHAT_ID),
-            text=f"📈 Сигнал на 5-хвилинний таймфрейм: {pair}\nЙмовірність вигоди: {currency_pairs[pair]}%"
+    candles = data["Time Series FX (5min)"]
+    times = sorted(candles.keys(), reverse=True)
+
+    if len(times) < 2:
+        return None
+
+    last = candles[times[0]]
+    prev = candles[times[1]]
+
+    last_close = float(last["4. close"])
+    prev_close = float(prev["4. close"])
+
+    direction = "UP 📈 (Buy)" if last_close > prev_close else "DOWN 📉 (Sell)"
+    probability = round(abs((last_close - prev_close) / prev_close) * 100, 2)
+
+    return {
+        "pair": pair,
+        "direction": direction,
+        "last_close": last_close,
+        "probability": probability,
+    }
+
+# 📤 Надсилаємо сигнал у Telegram
+async def send_signal(app, pair="EUR/USD"):
+    signal = get_forex_signal(pair)
+    if signal:
+        message = (
+            f"📊 Сигнал на 5-хв таймфрейм\n"
+            f"Валютна пара: {signal['pair']}\n"
+            f"Напрямок: {signal['direction']}\n"
+            f"Ймовірність: {signal['probability']}%\n"
+            f"Ціна: {signal['last_close']}"
         )
-    except Exception as e:
-        print(f"Помилка надсилання сигналу: {e}")
+        await app.bot.send_message(chat_id=int(TG_CHAT_ID), text=message)
+    else:
+        await app.bot.send_message(chat_id=int(TG_CHAT_ID), text="❌ Не вдалося отримати сигнал")
 
+# 🚀 Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global sending_signals
+    chat_id = update.effective_chat.id
+    await update.message.reply_text(f"Бот запущено. Твій chat_id: {chat_id}")
+
     if sending_signals:
         await update.message.reply_text("Сигнали вже надсилаються ⏳")
         return
+
     sending_signals = True
-    chat_id = update.effective_chat.id
-    await update.message.reply_text(f"Бот запущено. Твій chat_id: {chat_id}")
     await update.message.reply_text("Надсилання 3 сигналів через 3 хвилини ✅")
 
+    # Відправляємо 3 сигнали підряд кожні 3 хвилини
+    pairs = ["EUR/USD", "GBP/USD", "AUD/USD", "USD/JPY"]
     for i in range(3):
         if not sending_signals:
             break
-        await send_signal(context.application)
+        pair = pairs[i % len(pairs)]
+        await send_signal(context.application, pair)
         if i < 2:
-            await asyncio.sleep(180)  # 3 хвилини
-    sending_signals = False
-    await update.message.reply_text("Всі сигнали надіслані або надсилання зупинено ⛔")
+            await asyncio.sleep(180)
 
+    sending_signals = False
+    await update.message.reply_text("✅ Всі сигнали надіслані або надсилання зупинено ⛔")
+
+# 🛑 Команда /stop
 async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global sending_signals
     sending_signals = False
     await update.message.reply_text("Сигнали зупинено ⛔")
 
+# 🔧 Головна функція
 def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
