@@ -5,7 +5,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 # Токен бота та chat_id з Environment Variables
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-TG_CHAT_ID = os.environ.get("TG_CHAT_ID")  # числовий chat_id
+TG_CHAT_ID = os.environ.get("TG_CHAT_ID")  # числовий ID
 
 # Функція для надсилання сигналу
 async def send_signal(app):
@@ -15,16 +15,15 @@ async def send_signal(app):
 # Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    # Показуємо chat_id для перевірки
     await update.message.reply_text(f"Твій chat_id: {chat_id}")
-    # Надсилаємо тестовий сигнал
+    # Надсилаємо сигнал
     await send_signal(context.application)
 
 # Основна функція
 async def main():
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    # Працюємо через run_polling (він автоматично initialize/start/polling)
+    # Використовуємо тільки run_polling()
     await app.run_polling()
     print("Bot started successfully")
 
