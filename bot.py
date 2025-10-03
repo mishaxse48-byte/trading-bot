@@ -1,43 +1,32 @@
-import logging
 import os
-import time
+import asyncio
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# Токен бота, його потрібно додати у Render як TELEGRAM_TOKEN
-TOKEN = os.environ.get("TELEGRAM_TOKEN")
+# Отримуємо токен і chat_id з Environment Variables
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TG_CHAT_ID = os.environ.get("TG_CHAT_ID")  # числовий chat_id
 
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+# Приклад функції для надсилання сигналу
+async def send_signal(app):
+    if TG_CHAT_ID:
+        await app.bot.send_message(chat_id=int(TG_CHAT_ID), text="Сигнал для торгівлі активовано!")
 
 # Команда /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Привіт 👋 Я твій навчальний трейдинг-бот!")
+    await update.message.reply_text("Бот готовий. Надсилаю сигнал...")
+    # Викликаємо функцію сигналу
+    await send_signal(context.application)
 
-# Тестова функція для надсилання сигналів
-async def signal_sender(application):
-    while True:
-        try:
-            chat_id = os.environ.get("TG_CHAT_ID")
-            if chat_id:
-                await application.bot.send_message(chat_id=chat_id, text="🔔 Тестовий сигнал: Купити EUR/USD")
-            time.sleep(600)  # чекати 10 хвилин
-        except Exception as e:
-            print(f"Помилка: {e}")
-            time.sleep(10)
+# Основна функція
+async def main():
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-def main():
-    app = ApplicationBuilder().token(TOKEN).build()
-
+    # Додаємо обробник команди /start
     app.add_handler(CommandHandler("start", start))
 
-    # запуск у фоновому режимі
-    app.post_init(signal_sender(app))
-
-    print("✅ Бот запущений...")
-    app.run_polling()
+    # Запускаємо бота
+    await app.run_polling()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
